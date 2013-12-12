@@ -82,6 +82,20 @@ void tcb_state();
 
 void f1();
 void f2();
+void p(semaphore *sem);
+void v(semaphore *sem);
+
+void block(struct TCB **qp);
+void wakeup_first(struct TCB **qp);
+
+struct buffer*getbuf(void);
+void insert(struct buffer **mq, struct buffer *buff);
+void send(char *receiver, char *a, int size);
+struct buffer* remov(struct buffer **mq, int sender);
+int receive(char *sender, char *b);
+
+void producer();
+void customer();
 
 void printfMenu();
 
@@ -102,8 +116,6 @@ int main()
 	printf("please select a item over: ");
 	scanf("%d", &chosen_item);
 
-	while(chosen_item != 0)
-	{
 		switch(chosen_item)
 		{
 			case 1:
@@ -111,6 +123,7 @@ int main()
 				create("f2", (codeptr)f2, 1024);
 				break;
 			case 2:
+
 				break;
 			case 3:
 				break;
@@ -365,4 +378,189 @@ void printfMenu()
 	{
 		printf("%s\n", menu[0]);
 	}
+}
+
+void p(semaphore *sem)
+{
+	struct TCB **qp;
+	disable();
+		sem->value = sem->value - 1;
+		if (sem->value < 0)
+		{
+			qp = &(sem->wq);
+			block(qp);
+		}
+	enable();
+}
+
+void v(semaphore *sem)
+{
+	struct TCB **qp;
+	disable();
+		qp = &(sem->wq);
+		sem->value = sem->value + 1;
+		if (sem->value <= 0)
+		{
+			wakeup_first(qp);
+		}
+	enable();
+}
+
+void block(struct TCB **qp)
+{
+	struct TCB *temp;
+	disable();
+		temp = *qp;
+		tcb[current].state = BLOCKED;
+		while(temp->next != NULL)
+		{
+			temp = temp->next;
+		}
+		temp->next = tcb[current];
+	enable();
+	switch();
+}
+
+void wakeup_first(struct TCB **qp)
+{
+	disable();
+		*qp->state = READY;
+		*qp = *qp->next;
+	enable();
+}
+
+struct buffer*getbuf(void)
+{
+	struct buffer *buff;
+	buff = freeebuf;
+	freebuf = freebuf->next;
+	return (buff);
+}
+
+void insert(struct buffer **mq, struct buffer *buff)
+{
+	struct buffer *temp;
+	if (buff == NULL)
+	{
+		return;
+	}
+	buff->next = NULL;
+	if (*mq == NULL)
+	{
+		*mq = buff;
+	}
+	else
+	{
+		temp = *mq;
+		while(temp->next != NULL)
+		{
+			temp = temp->next;
+		}
+		temp->next = buff;
+	}
+}
+
+void send(char *receiver, char *a, int size)
+{
+	struct buffer* buff;
+	int i, id = -1;
+	disable();
+	for(i = 0; i TCBNUM; i++)
+	{
+		if (strcmp(tcb[i].name, receiver) == 0)
+		{
+			id = i;
+			break;
+		}
+	}
+	if (id == -1)
+	{
+		printf("Error: Receiver not exist!\n");
+		enable();
+		return;
+	}
+
+	p(&sfb);
+	p(&mutexfb);
+	buff = getbuf();
+	v(&mutexfb);
+
+	buff->id = current;
+	buff->size = size;
+	buff->next = NULL;
+	for(i = 0; i < buff->size; i++, a++)
+	{
+		buff->text[i] = *a;
+	}
+	p(&tcb[id].mutex);
+	insert(&(tcb[id].mq), buff);
+	v(&tcb[id].mutex);
+	v(&tcb[id].sm);
+
+	enable;
+}
+
+struct buffer* remov(struct buffer **mq, int sender)
+{
+	struct buffer *temp;
+	struct buffer *rtn;
+	if (*mq == NULL)
+	{
+		return;
+	}
+
+	temp = *mq;
+	if (temp->sender == sender)
+	{
+		*mq = temp->next;
+		return temp;
+	}
+
+	while(temp->next != NULL)
+	{
+		if (temp->next->sender == sender)
+		{
+			rtn = temp->next;
+			temp->next = temp->next->next;
+			return trn;
+		}
+		temp = temp->next;
+	}
+}
+
+int receive(char *sender, char *b)
+{
+	int i, id = -1;
+	struct buffer *temp;
+	for (i = 0; i < TCBNUM; i++)
+	{
+		if (strcmp(tcb[i].name, sender) == 0)
+		{
+			id = i;
+			break;
+		}	
+	}
+	if (id == -1)
+	{
+		return;
+	}
+	temp = remov(&tcb[i].mq, id);
+	for(i = 0; i < temp->size; i++)
+	{
+		b[i] = temp->text[i];
+	}
+	p(&mutexfb);
+	insert(&freebuf, temp);
+	v(&sfb);
+	v(&mutexfb);
+}
+
+void producer()
+{
+
+}
+
+void customer()
+{
+
 }
