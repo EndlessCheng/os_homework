@@ -1,0 +1,368 @@
+#include <stdio.h>
+#include <dos.h>
+#include <string.h>
+#include <stdlib.h>
+
+#define TCBNUM 5
+
+#define NTEXT 20
+
+#define GET_INDOS 0x34
+#define GET_CRIT_ERR 0x5d06
+
+#define FINISHED 0
+#define RUNNING 1
+#define READY 2
+#define BLOCKED 3
+#define MENU_ITEM 4
+
+char menu[MENU_ITEM][40] = {
+	"A-nter key 1 to run the f1 and f2",
+	"B-Enter key 2 to run the producer and customer",
+	"C-nter key 3 to passing message bettwen the phread",
+	"D-Enter key 0 to exit"
+};
+
+char far *indos_ptr = 0;
+char far *crit_err_ptr = 0;
+int current = 0;
+int timecount = 0;
+int TL = 1;
+int buf[5];
+
+typedef struct
+{
+    int value; 
+    struct TCB *wq;
+}semaphore;
+
+struct buffer
+{
+	int sender;
+	int size;
+	char text[NTEXT];
+	struct buffer *next;
+};
+
+struct TCB
+{
+	unsigned char *stack;
+	unsigned ss;
+	unsigned sp;
+	char state;
+	char name[10];
+	struct TCB *next;
+	struct buffer *mq;
+	semaphore mutex;
+	semaphore sm;
+};
+struct int_regs
+{
+	unsigned BP, DI, SI, DS, ES, DX, CX, BX, AX, IP, CS, Flags, off, seg;
+};
+
+struct TCB tcb[TCBNUM];
+
+typedef int(far *codeptr)(void);
+void interrupt (*old_int8)();
+
+int finished();
+
+void initDos();
+int DosBusy();
+int create(char *name, codeptr code, int stck);
+void over();
+void destory(int id);;
+void initTcb();
+void interrupt my_switch();
+void interrupt new_int8();
+
+int find();
+void tcb_state();
+
+void f1();
+void f2();
+
+void printfMenu();
+
+int main()
+{
+	int chosen_item, i;
+	initDos();
+	initTcb();
+	old_int8 = getvect(8);
+	strcpy(tcb[0].name, "main");
+	tcb[0].state = RUNNING;
+	current = 0;
+	printf("/*-------------*/\n");
+	for(i = 0; i < 3; i++)
+	{
+		printf("%s\n", menu[0]);
+	}
+	printf("please select a item over: ");
+	scanf("%d", &chosen_item);
+
+	while(chosen_item != 0)
+	{
+		switch(chosen_item)
+		{
+			case 1:
+				create("f1", (codeptr)f1, 1024);
+				create("f2", (codeptr)f2, 1024);
+				break;
+			case 2:
+				break;
+			case 3:
+				break;
+			default:
+				printf("Please enter the correct choice\n");
+				break;
+		}
+		printfMenu();
+		printf("please select a item over: ");
+		scanf("%d", &chosen_item);
+	}
+	
+	/*tcb_state();*/
+
+	setvect(8, new_int8);
+	my_switch();
+	while(!finished());
+	tcb[0].name[0] = '\0';
+	tcb[0].state = FINISHED;
+	setvect(8, old_int8);
+
+	tcb_state();
+	printf("hello world");
+	system("pause");
+	return 0;
+}
+void initDos()
+{
+	union REGS regs;
+	struct SREGS segregs;
+
+	regs.h.ah = GET_INDOS;
+	intdosx(&regs, &regs, &segregs);
+	indos_ptr = MK_FP(segregs.es, regs.x.bx);
+
+	if (_osmajor < 3)
+	{
+		crit_err_ptr = indos_ptr + 1;
+	}else if(_osmajor == 3 && _osmajor==0)
+	{
+		crit_err_ptr = indos_ptr - 1;
+	}else
+	{
+		regs.x.ax = GET_CRIT_ERR;
+		intdosx(&regs, &regs, &segregs);
+		crit_err_ptr = MK_FP(segregs.ds, regs.x.si);
+	}
+}
+
+int DosBusy()
+{
+	if (indos_ptr && crit_err_ptr)
+	{
+		return (*indos_ptr || *crit_err_ptr);
+	}
+	else
+	{
+		return -1;
+	}
+}
+void initTcb()
+{
+	int i;
+	for(i = 0; i < TCBNUM; i++)
+	{
+		tcb[i].stack = NULL;
+		tcb[i].state = FINISHED;
+		tcb[i].name[0] = '\0';
+		tcb[i].next = NULL;
+		tcb[i].mq = NULL;
+		tcb[i].mutex.value=1;
+		tcb[i].mutex.wq=NULL;
+		tcb[i].sm.value=0;
+		tcb[i].sm.wq=NULL;
+	}
+}
+
+int create(char *name, codeptr code, int stck)
+{
+	int i, index;
+	struct int_regs far *regs;
+	disable();
+	for(i = 0; i < TCBNUM; i++)
+	{
+		if(tcb[i].state == FINISHED)
+		{
+			index = i;
+			break;
+		}
+	}
+	if (i == TCBNUM)
+	{
+		printf("cannot find a null tcb");
+		return -1;
+	}
+
+	tcb[index].stack = (char *)malloc(stck);
+	regs = (struct int_regs far *)(tcb[index].stack + stck);
+	regs--;
+
+	tcb[index].ss = FP_SEG(regs);
+	tcb[index].sp = FP_OFF(regs);
+	tcb[index].state = READY;
+	strcpy(tcb[index].name, name);
+
+	regs->DS = _DS;
+    regs->ES = _ES;
+	regs->IP = FP_OFF(code);
+	regs->CS = FP_SEG(code);
+	regs->Flags = 0x200;
+	regs->off = FP_OFF(over);
+	regs->seg = FP_SEG(over);
+	enable();
+	return index;
+}
+
+void over()
+{
+   destory(current);
+   my_switch();
+}
+
+void destory(int i)
+{
+	disable();
+	free(tcb[i].stack);
+	tcb[i].stack=NULL;
+	tcb[i].state = FINISHED;
+	tcb[i].name[0] = '\0';
+	tcb[i].next =NULL;
+	tcb[i].mq = NULL;
+	tcb[i].mutex.value=1;
+	tcb[i].mutex.wq = NULL;
+	tcb[i].sm.value=0;
+	tcb[i].sm.wq=NULL;
+	enable();
+}
+
+void interrupt new_int8()
+{
+	(*old_int8)();
+	timecount++;
+	if (timecount < TL/* || DosBusy()*/)
+	{
+		return;
+	}
+	my_switch();
+}
+
+void interrupt my_switch()
+{
+	int i;
+	disable();
+	tcb[current].ss = _SS;
+	tcb[current].sp = _SP;
+	if (tcb[current].state == RUNNING)
+	{
+		tcb[current].state = READY;
+	}
+	i = find();
+	if (i < 0)
+	{
+		i = 0;
+	}
+	_SS = tcb[i].ss;
+	_SP = tcb[i].sp;
+	tcb[i].state = RUNNING;
+	current = i;
+	timecount = 0;
+	enable();
+}
+
+int find()
+{
+	int id;
+	for(id = current + 1; id < TCBNUM; id++)
+	{
+		if(tcb[id].state == READY)
+		{
+			return id;
+		}
+	}
+	for(id = 0; id < current; id++)
+	{
+		if (tcb[id].state == READY)
+		{
+			return id;
+		}
+	}
+
+	return -1;
+}
+
+void tcb_state()
+{
+    int id;
+    printf("\n  **** The current threads' state ****\n");
+    for(id = 0; id < TCBNUM; id++)
+    {
+        printf("Thread%d %9s state is ", id, tcb[id].name);
+        switch(tcb[id].state)
+        {
+            case FINISHED: puts("FINISHED"); break;
+            case RUNNING: puts("RUNNING"); break;
+            case READY: puts("READY"); break;
+            case BLOCKED: puts("BLOCKED"); break;
+        }
+    }
+}
+
+int finished()
+{
+	int id;
+	for(id = 1; id < TCBNUM; id++)
+	{
+		if (tcb[id].state != FINISHED)
+			return 0;
+	}
+	return 1;
+}
+
+void f1()
+{
+    int i, j, k;
+    for(i = 0; i < 50; i++)
+    {
+	putchar('a');
+
+	for(j = 0; j < 500; j++)
+	    for(k = 0; k < 500; k++);
+    }
+}
+
+
+void f2()
+{
+    long i, j, k;
+    for(i = 0; i < 30; i++)
+    {
+	putchar('b');
+
+	for(j = 0; j < 500; j++)
+	    for(k = 0; k < 500; k++);
+    }
+}
+
+void printfMenu()
+{
+	int i;
+	printf("/*-------------*/\n");
+	for(i = 0; i < 3; i++)
+	{
+		printf("%s\n", menu[0]);
+	}
+}
