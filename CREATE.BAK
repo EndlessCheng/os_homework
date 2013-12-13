@@ -55,6 +55,7 @@ struct TCB
 	struct buffer *mq;
 	semaphore mutex;
 	semaphore sm;
+	struct TCB *next;
 };
 struct int_regs
 {
@@ -76,7 +77,7 @@ void destory(int id);;
 void initTcb();
 void interrupt my_switch();
 void interrupt new_int8();
-void interrupt swtch();
+void interrupt swtch(void);
 
 int find();
 void tcb_state();
@@ -295,17 +296,6 @@ void interrupt my_switch()
 	enable();
 }
 
-void interrupt swtch()
-{
-	disable();
-		ss1 = _SS;
-		sp1 = _SP;
-
-		_SS = ss2;
-		_SP = sp2;
-	enable();
-}
-
 int find()
 {
 	int id;
@@ -426,7 +416,7 @@ void block(struct TCB **qp)
 		{
 			temp = temp->next;
 		}
-		temp->next = &tcb[current];
+		temp->next = tcb[current];
 	enable();
 	switch();
 }
