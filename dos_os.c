@@ -74,6 +74,11 @@ struct int_regs{
  */
 typedef int (far *codeptr)(void);
 
+/*
+ * 目前正在运行的线程的内部标识符
+ */
+int current;
+
 /*--------------
  *初始化tcb数组
  -----------------*/
@@ -99,10 +104,27 @@ int DosBusy();
  */
 int create(char *name, codeptr code, int stck_length);
 
+/*
+ * 线程销毁函数
+ * id 线程内部标识符
+ */
+void destroy(int id);
+
+/*
+ * 线程自动撤销函数
+ */
+void over();
+
 /*--------------
  *打印所有tcb数组
  -----------------*/
 void printTCB();
+
+/*
+ *两个打印字符的线程
+ */
+void f1();
+void f2();
 
 int main()
 {
@@ -231,11 +253,65 @@ int create(char *name, codeptr code, int stck_length)
 	return id;
 }
 
+void destroy(int id)
+{
+	if (id < 1 || id >= TCB_MAX_NUM)
+	{
+		printf("Error: There is no pthread %d\n", id);
+		return;
+	}
+	tcb[id].state = FINISHED;
+	memset(tcb[id].name, '\0', NAME_LENGTH);
+	free(tcb[id].stack);
+	tcb[id].stack = NULL;
+}
+
+/*
+ * 先调用destroy，销毁当前线程，然后调用swtch进行重新调度
+ */
+void over()
+{
+	disalbe();
+		destroy(current);
+		swtch();
+	enable();
+}
+
 void printTCB()
 {
 	int i;
 	for(i = 0; i < TCB_MAX_NUM; i++)
 	{
 		printf("pthread %d[%s]: state-----%d\n", i, tcb[i].name, tcb[i].state);
+	}
+}
+
+void f1()
+{
+	int i, j, k;
+	for (i = 0; i < 30; i++)
+	{
+		printf("A");
+		for(j = 0; j < 10000; j++)
+		{
+			for(k = 0; k < 10000; k++)
+			{
+			}
+		}
+	}
+}
+
+void f2()
+{
+	int i, j, k;
+	for (i = 0; i < 30; i++)
+	{
+		printf("B");
+		for(j = 0; j < 10000; j++)
+		{
+			for(k = 0; k < 10000; k++)
+			{
+			}
+		}
 	}
 }
