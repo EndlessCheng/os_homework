@@ -35,7 +35,7 @@
 /*
  *每个线程能执行的时间片
  */
-#define TL 3
+#define TL 8
 
 #define MENU_ITEM 4
 
@@ -214,6 +214,7 @@ int main()
 		case 1:
 			create("f1", (codeptr)f1, 1024);
 			create("f2", (codeptr)f2, 1024);
+			printTCB();
 			break;
 		case 2:
 
@@ -236,6 +237,7 @@ int main()
 	tcb[0].state = FINISHED;
 	setvect(8, old_int8);
 	
+	system("pause");
 	return 0;
 }
 
@@ -301,7 +303,7 @@ int DosBusy()
 	}
 	else
 	{
-		return -1;
+		return 0;
 	}
 }
 
@@ -402,7 +404,7 @@ void interrupt new_int8()
 	/*
 	 * 当时间片已经用完而且INT 21H没有执行中,就进行重新调度
 	 */
-	if (timecount >= TL && DosBusy() == -1)
+	if (timecount > TL && DosBusy() == 0)
 	{
 		my_swtch();
 	}
@@ -412,6 +414,7 @@ void interrupt my_swtch()
 {
 	int ready_pthread;
 	disable();
+		/*printf("CURRENT pthread is %d ", current);*/
 		tcb[current].ss = _SS;
 		tcb[current].sp = _SP;
 		if (tcb[current].state == RUNNING)
@@ -419,6 +422,7 @@ void interrupt my_swtch()
 			tcb[current].state = READY;
 		}
 		ready_pthread = find();
+		/*printf(" NOW find a ready pthread %d, gonna to swtch\n", ready_pthread);*/
 		_SS = tcb[ready_pthread].ss;
 		_SP = tcb[ready_pthread].sp;
 		tcb[ready_pthread].state = RUNNING;
@@ -475,6 +479,7 @@ void printTCB()
 	int i;
 	for(i = 0; i < TCB_MAX_NUM; i++)
 	{
+		printf("\n");
 		printf("pthread %d[%s]: state-----%d\n", i, tcb[i].name, tcb[i].state);
 	}
 }
