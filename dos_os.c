@@ -531,6 +531,14 @@ void p(struct semaphore *sem)
 		{
 			qp = &(sem->wq);
 			block(qp);
+			if (*qp == NULL)
+			{
+				printf("the block qp is NULL in p operation\n");
+			}
+			else
+			{
+				printf("the block qp is not NULL in p operation, name is %s \n", (*qp)->name);
+			}
 		}
 	enable();
 }
@@ -543,7 +551,18 @@ void v(struct semaphore *sem)
 		sem->value = sem->value + 1;
 		if (sem->value <= 0)
 		{
+			printf("start to wakeup_first\n");
+			if (*qp == NULL)
+			{
+				printf("the block qp is NULL in v operation\n");
+			}
+			else
+			{
+				printf("the block qp is not NULL in v operation, name is %s \n", (*qp)->name);
+			}
 			wakeup_first(qp);
+			
+			printTCB();
 		}
 	enable();
 }
@@ -555,11 +574,7 @@ void block(struct TCB **qp)
 		temp = *qp;
 		printf("the thread named %s has been blocked\n", tcb[current].name);
 		tcb[current].state = BLOCKED;
-		while(temp->next != NULL)
-		{
-			temp = temp->next;
-		}
-		temp->next = &tcb[current];
+		temp = &(tcb[current]);//TDO
 	enable();
 	my_swtch();
 }
@@ -569,10 +584,14 @@ void wakeup_first(struct TCB **qp)
 	disable();
 		if (*qp != NULL)
 		{
-			//printf("has wakeup a thread named %s\n", (*qp)->name);
+			printf("has wakeup a thread named %s\n", (*qp)->name);
 			(*qp)->state = READY;
 			*qp = (*qp)->next;
-		}		
+		}
+		else
+		{
+			printf("the qp is null in the wakeup_first\n");
+		}	
 	enable();
 }
 
@@ -625,7 +644,7 @@ void f2()
 void producer()
 {
 	int i, j, k;
-	for(i = 0; i < 30; i++)
+	for(i = 0; i < 10; i++)
 	{
 		v(&goods);
 		printf("producer has produced a good. Now has %d pairs of goods\n", goods.value);
@@ -642,13 +661,13 @@ void producer()
 void customer()
 {
 	int i, j, k;
-	for(i = 0; i < 40; i++)
+	for(i = 0; i < 10; i++)
 	{
 		p(&goods);
 		printf("customer has customed a good. Now has %d pairs of goods\n", goods.value);
-		for(j = 0; j < 10000; j++)
+		for(j = 0; j < 1000; j++)
 		{
-			for(k = 0; k < 10000; k++)
+			for(k = 0; k < 1000; k++)
 			{
 			}
 		}
