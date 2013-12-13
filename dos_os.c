@@ -115,6 +115,19 @@ char menu[MENU_ITEM][80] = {
 	"D-Enter key 0 to exit"
 };
 
+/*
+ * 记录型信号量
+ */
+struct semaphore {
+	int value;
+	struct TCB *wq;
+};
+
+/*
+ * 商品的信号量
+ */
+struct semaphore goods;
+
 /*--------------
  *初始化tcb数组
  -----------------*/
@@ -177,6 +190,26 @@ int find();
  */
 int finished();
 
+/*
+ * 对记录型信号量的P操作
+ */
+void p(struct semaphore *sem);
+
+/*
+ * 对记录型信号量的V操作
+ */
+void v(struct semaphore *sem);
+
+/*
+ * 阻塞线程
+ */
+void block(struct TCB **qp);
+
+/*
+ * 唤醒线程
+ */
+void wakeup_first(struct TCB **qp);
+
 /*--------------
  *打印所有tcb数组
  -----------------*/
@@ -187,6 +220,16 @@ void printTCB();
  */
 void f1();
 void f2();
+
+/*
+ * 生产者 函数
+ */
+void producer();
+
+/*
+ * 消费者
+ */
+void customer();
 
 /*
  * main 函数
@@ -204,7 +247,7 @@ int main()
 	printf("/*-------------*/\n");
 	for(i = 0; i < 3; i++)
 	{
-		printf("%s\n", menu[0]);
+		printf("%s\n", menu[i]);
 	}
 	printf("please select a item over: ");
 	scanf("%d", &chosen_item);
@@ -214,10 +257,15 @@ int main()
 		case 1:
 			create("f1", (codeptr)f1, 1024);
 			create("f2", (codeptr)f2, 1024);
-			printTCB();
 			break;
 		case 2:
-
+			/*
+			 *对商品进行初始化
+			 */
+			goods.value = 0;
+			goods.wq = NULL;
+			create("producer", (codeptr)producer, 1024);
+			create("customer", (codeptr)customer, 1024);
 			break;
 		case 3:
 			break;
@@ -474,6 +522,60 @@ int finished()
 	return 1;
 }
 
+void p(struct semaphore *sem)
+{
+	struct TCB **qp;
+	disable();
+		sem->value = sem->value - 1;
+		if (sem->value < 0)
+		{
+			qp = &(sem->wq);
+			block(qp);
+		}
+	enable();
+}
+
+void v(struct semaphore *sem)
+{
+	struct TCB **qp;
+	disable();
+		qp = &(sem->wq);
+		sem->value = sem->value + 1;
+		if (sem->value <= 0)
+		{
+			wakeup_first(qp);
+		}
+	enable();
+}
+
+void block(struct TCB **qp)
+{
+	struct TCB *temp;
+	disable();
+		temp = *qp;
+		printf("the thread named %s has been blocked\n", tcb[current].name);
+		tcb[current].state = BLOCKED;
+		while(temp->next != NULL)
+		{
+			temp = temp->next;
+		}
+		temp->next = &tcb[current];
+	enable();
+	my_swtch();
+}
+
+void wakeup_first(struct TCB **qp)
+{
+	disable();
+		if (*qp != NULL)
+		{
+			//printf("has wakeup a thread named %s\n", (*qp)->name);
+			(*qp)->state = READY;
+			*qp = (*qp)->next;
+		}		
+	enable();
+}
+
 void printTCB()
 {
 	int i;
@@ -511,6 +613,39 @@ void f2()
 		/*
 		 * 同f1中的
 		 */
+		for(j = 0; j < 10000; j++)
+		{
+			for(k = 0; k < 10000; k++)
+			{
+			}
+		}
+	}
+}
+
+void producer()
+{
+	int i, j, k;
+	for(i = 0; i < 30; i++)
+	{
+		v(&goods);
+		printf("producer has produced a good. Now has %d pairs of goods\n", goods.value);
+		for(j = 0; j < 10000; j++)
+		{
+			for(k = 0; k < 10000; k++)
+			{
+			}
+		}
+	}
+	
+}
+
+void customer()
+{
+	int i, j, k;
+	for(i = 0; i < 40; i++)
+	{
+		p(&goods);
+		printf("customer has customed a good. Now has %d pairs of goods\n", goods.value);
 		for(j = 0; j < 10000; j++)
 		{
 			for(k = 0; k < 10000; k++)
