@@ -25,8 +25,17 @@
  ---------------------------*/
 #define NAME_LENGTH 10
 
+/*
+ * GET_INDOS 是否调用系统功能的标志
+ * GET_CRIT_ERR
+ */
 #define GET_INDOS 0x34
 #define GET_CRIT_ERR 0x5d06
+
+/*
+ *每个线程能执行的时间片
+ */
+#define TL 3
 
 /*---------------
  * TCB 结构体 表示一个线程
@@ -75,18 +84,34 @@ struct int_regs{
 typedef int (far *codeptr)(void);
 
 /*
+ * 定义函数指针类型，用来保存旧的时钟中断处理函数首地址
+ */
+void interrupt (*old_int8)();
+
+/*
  * 目前正在运行的线程的内部标识符
  */
 int current;
+
+/*
+ *线程切换的时候，用来保存线程堆栈地址
+ */
+unsigned char ss1, sp1, ss2, sp2;
+
+/*
+ * 线程已经执行的时间
+ */
+int timecount = 0;
 
 /*--------------
  *初始化tcb数组
  -----------------*/
 void initTCB();
 
-/*--------------
- *初始化DOS环境
- *获得INDOS标志的地址和严重错误标志的地址
+/* func initDOS
+ * 初始化DOS环境
+ * 获得INDOS标志的地址和严重错误标志的地址
+ * 获取系统时钟中断处理函数，并保存在old_int8中
  -----------------*/
 void initDOS();
 
@@ -114,6 +139,26 @@ void destroy(int id);
  * 线程自动撤销函数
  */
 void over();
+
+/*
+ * 实现在两个线程间的切换
+ */
+void interrupt swtch();
+
+/*
+ * 处理因时间片到了的调度
+ */
+void interrupt new_int8();
+
+/*
+ *线程调度
+ */
+void interrupt my_swtch();
+
+/*
+ * 找到一个新的就绪线程
+ */
+int find();
 
 /*--------------
  *打印所有tcb数组
@@ -182,6 +227,10 @@ void initDOS()
 		intdosx(&regs, &regs, &segregs);
 		crit_err_ptr = MK_FP(segregs.ds, regs.x.si);
 	}
+	/*
+	 * 获取系统时钟中断处理函数，并保存在old_int8中
+	 */
+	old_int8 = getvect(8);
 
 }
 
@@ -277,6 +326,47 @@ void over()
 	enable();
 }
 
+void interrupt swtch()
+{
+	disalbe();
+		ss1 = _SS;
+		sp1 = _SP;
+		_SS = ss2;
+		_SP = sp2;
+	enable();
+}
+
+void interrupt new_int8()
+{
+	(*old_int8)();
+	timecount++;
+	/*
+	 * 当时间片已经用完而且INT 21H没有执行中,就进行重新调度
+	 */
+	if (timecount >= TL && DosBusy() == -1)
+	{
+		my_swtch();
+	}
+}
+
+void interrupt my_swtch()
+{
+	int new_pthread;
+	disalbe();
+		tcb[current].ss = _SS;
+		tcb[current].sp = _SP;
+		if (tcb[current].state == RUNNING)
+		{
+			tcb[current].state = READY;
+		}
+	enable();
+}
+
+void find()
+{
+	
+}
+
 void printTCB()
 {
 	int i;
@@ -292,6 +382,9 @@ void f1()
 	for (i = 0; i < 30; i++)
 	{
 		printf("A");
+		/*
+		 * 这个是为了延时，否则打印操作在一个最短的时间片就执行完了，无法体现线程间的调度
+		 */
 		for(j = 0; j < 10000; j++)
 		{
 			for(k = 0; k < 10000; k++)
@@ -307,6 +400,9 @@ void f2()
 	for (i = 0; i < 30; i++)
 	{
 		printf("B");
+		/*
+		 * 同f1中的
+		 */
 		for(j = 0; j < 10000; j++)
 		{
 			for(k = 0; k < 10000; k++)
