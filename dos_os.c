@@ -37,6 +37,8 @@
  */
 #define TL 3
 
+#define MENU_ITEM 4
+
 /*---------------
  * TCB 结构体 表示一个线程
  * stack 堆栈起始地址
@@ -47,10 +49,10 @@
  * struct TCB *next 为了方便形成链表，所设的指向下一个tcb的指针
 -----------------*/
 struct TCB{
-	unsigned char *stack; 
+	unsigned char *stack;
 	unsigned ss;
-	unsigned sp; 
-	char state; 
+	unsigned sp;
+	char state;
 	char name[NAME_LENGTH];
 	struct TCB *next;
 };
@@ -74,7 +76,7 @@ char far *crit_err_ptr = 0;
  * 模拟堆栈
  */
 struct int_regs{
-	unsigned bp, di, si, ds, es, dx, cs,bx, ax, ip, cs, flags, off, seg;
+	unsigned BP, DI, SI, DS, ES, DX, CX, BX, AX, IP, CS, Flags, off, seg;
 };
 
 /*
@@ -102,6 +104,16 @@ unsigned char ss1, sp1, ss2, sp2;
  * 线程已经执行的时间
  */
 int timecount = 0;
+
+/*
+ *菜单信息
+ */
+char menu[MENU_ITEM][80] = {
+	"A-nter key 1 to run the f1 and f2",
+	"B-Enter key 2 to run the producer and customer",
+	"C-nter key 3 to passing message bettwen the phread",
+	"D-Enter key 0 to exit"
+};
 
 /*--------------
  *初始化tcb数组
@@ -142,8 +154,8 @@ void over();
 
 /*
  * 实现在两个线程间的切换
- */
-void interrupt swtch();
+ * 暂时先注释掉void interrupt swtch();
+*/
 
 /*
  * 处理因时间片到了的调度
@@ -160,6 +172,11 @@ void interrupt my_swtch();
  */
 int find();
 
+/*
+ * 其他线程是否已经结束
+ */
+int finished();
+
 /*--------------
  *打印所有tcb数组
  -----------------*/
@@ -171,12 +188,54 @@ void printTCB();
 void f1();
 void f2();
 
+/*
+ * main 函数
+ */
 int main()
 {
+	int i, chosen_item;
 	initTCB();
 	initDOS();
 
+	strcpy(tcb[0].name, "main");
+	tcb[0].state = RUNNING;
+	current = 0;
 
+	printf("/*-------------*/\n");
+	for(i = 0; i < 3; i++)
+	{
+		printf("%s\n", menu[0]);
+	}
+	printf("please select a item over: ");
+	scanf("%d", &chosen_item);
+
+	switch(chosen_item)
+	{
+		case 1:
+			create("f1", (codeptr)f1, 1024);
+			create("f2", (codeptr)f2, 1024);
+			break;
+		case 2:
+
+			break;
+		case 3:
+			break;
+		default:
+			printf("Please enter the correct choice\n");
+			break;
+	}
+
+	setvect(8, new_int8);
+	my_swtch();
+	while(finished() != 1)
+	{
+		continue;
+	}
+
+	memset(tcb[0].name, '\0', NAME_LENGTH);
+	tcb[0].state = FINISHED;
+	setvect(8, old_int8);
+	
 	return 0;
 }
 
@@ -189,7 +248,7 @@ void initTCB()
 		tcb[i].ss = NULL;
 		tcb[i].sp = NULL;
 		tcb[i].state = FINISHED;
-		memset(name, '\0', NAME_LENGTH);
+		memset(tcb[i].name, '\0', NAME_LENGTH);
 		tcb[i].next = NULL;
 	}
 }
@@ -261,8 +320,8 @@ int create(char *name, codeptr code, int stck_length)
 	 */
 	struct int_regs far *regs;
 
-	disalbe();
-		for (i; i < TCB_MAX_NUM; i++)
+	disable();
+		for (; i < TCB_MAX_NUM; i++)
 		{
 			if (tcb[i].state == FINISHED)
 			{
@@ -320,21 +379,21 @@ void destroy(int id)
  */
 void over()
 {
-	disalbe();
+	disable();
 		destroy(current);
-		swtch();
+		my_swtch();
 	enable();
 }
 
-void interrupt swtch()
+/*void interrupt swtch()
 {
-	disalbe();
+	disable();
 		ss1 = _SS;
 		sp1 = _SP;
 		_SS = ss2;
 		_SP = sp2;
 	enable();
-}
+}*/
 
 void interrupt new_int8()
 {
@@ -351,20 +410,64 @@ void interrupt new_int8()
 
 void interrupt my_swtch()
 {
-	int new_pthread;
-	disalbe();
+	int ready_pthread;
+	disable();
 		tcb[current].ss = _SS;
 		tcb[current].sp = _SP;
 		if (tcb[current].state == RUNNING)
 		{
 			tcb[current].state = READY;
 		}
+		ready_pthread = find();
+		_SS = tcb[ready_pthread].ss;
+		_SP = tcb[ready_pthread].sp;
+		tcb[ready_pthread].state = RUNNING;
+		current = ready_pthread;
+		timecount = 0;
 	enable();
 }
 
-void find()
+int find()
 {
-	
+	int i, id = -1;
+	for(i = current + 1; i < TCB_MAX_NUM; i++)
+	{
+		if (tcb[i].state == READY)
+		{
+			id = i;
+			break;
+		}
+	}
+	if (id == -1)
+	{
+		for(i = 0; i < current; i++)
+		if (tcb[i].state == READY)
+		{
+			id = i;
+			break;
+		}
+	}
+	if (id == -1)
+	{
+		return current;
+	}
+	else
+	{
+		return id;
+	}
+}
+
+int finished()
+{
+	int i = 1;
+	for(; i < TCB_MAX_NUM; i++)
+	{
+		if (tcb[i].state != FINISHED)
+		{
+			return 0;
+		}
+	}
+	return 1;
 }
 
 void printTCB()

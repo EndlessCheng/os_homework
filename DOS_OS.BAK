@@ -232,7 +232,7 @@ int main()
 		continue;
 	}
 
-	memst(tcb[0].name, '\0', NAME_LENGTH);
+	memset(tcb[0].name, '\0', NAME_LENGTH);
 	tcb[0].state = FINISHED;
 	setvect(8, old_int8);
 	
@@ -320,7 +320,7 @@ int create(char *name, codeptr code, int stck_length)
 	 */
 	struct int_regs far *regs;
 
-	disalbe();
+	disable();
 		for (; i < TCB_MAX_NUM; i++)
 		{
 			if (tcb[i].state == FINISHED)
@@ -421,9 +421,9 @@ void interrupt my_swtch()
 		ready_pthread = find();
 		_SS = tcb[ready_pthread].ss;
 		_SP = tcb[ready_pthread].sp;
-		tcb[ready_pthread].sate = RUNNING;
+		tcb[ready_pthread].state = RUNNING;
 		current = ready_pthread;
-		timecount = 0
+		timecount = 0;
 	enable();
 }
 
