@@ -641,7 +641,7 @@ void producer()
 	{	
 		fprintf(file, "\nproducer are ready to V\n");
 		v(&goods);
-		fprintf(file, "Producer has produced a good. Now has %d pairs of goods\n", goods.value);
+		printf("Producer has produced a good. Now has %d pairs of goods\n", goods.value);
 		for(j = 0; j < 10000; j++)
 		{
 			for(k = 0; k < 10000; k++)
@@ -659,7 +659,7 @@ void customer()
 	{
 		fprintf(file, "\ncustomer are ready to P\n");
 		p(&goods);
-		fprintf(file, "Customer has taken out a good.\n");
+		printf("Customer has taken out a good.\n");
 		for(j = 0; j < 1000; j++)
 		{
 			for(k = 0; k < 1000; k++)
