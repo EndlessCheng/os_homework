@@ -20,6 +20,16 @@
  ---------------------------*/
 #define TCB_MAX_NUM 10
 
+/*
+ * 消息区 消息正文最大长度
+ */
+#define MSG_LENGTH 20
+
+/*
+ * 系统消息缓冲区的最大个数
+ */
+#define BUF_NUM 10
+
 /*--------------------------
  * NAME_LENGTH 线程名字的最大长度
  ---------------------------*/
@@ -65,19 +75,19 @@ struct buffer
 /*
  * 系统消息缓存区
  */
-struct buffer freebuf[BUF_NUM];
+struct buffer *freebuf;
 
 /*
  * 空闲消息缓冲区的记录型信号量, 用作互斥
  */
-struct semaphore mutexfb;
+struct semaphore mutexfb = {1, NULL};
 
 /*
  * 空闲消息缓冲区的信号量，用同步, 
  * 当系统空闲消息缓冲区为空的时候，线程请求，会阻塞
  * 有表示数量
  */
-struct semaphore sfb;
+struct semaphore sfb = {BUF_NUM, NULL};
 
 /*---------------
  * TCB 结构体 表示一个线程
@@ -87,6 +97,9 @@ struct semaphore sfb;
  * char state; 线程状态
  * char name[NAME_LENGTH] 线程的名字
  * struct TCB *next 为了方便形成链表，所设的指向下一个tcb的指针
+ * struct buffer *mq 接收线程的消息队列首指针
+ * struct semaphore mutex; 接收消息的互斥信号量
+ * struct semaphore sm; 接收消息的同步信号量
 -----------------*/
 struct TCB{
 	unsigned char *stack;
@@ -95,6 +108,9 @@ struct TCB{
 	char state;
 	char name[NAME_LENGTH];
 	struct TCB *next;
+	struct buffer *mq;
+	struct semaphore mutex;
+ 	struct semaphore sm;
 };
 
 /*
@@ -250,6 +266,11 @@ void block(struct TCB **qp);
 void wakeup_first(struct TCB **qp);
 
 /*
+ * 初始化消息缓冲区
+ */
+void initBuf();
+
+/*
  * 获取空闲缓冲区
  */
 struct buffer *getBuf();
@@ -265,10 +286,25 @@ void insert(struct buffer **mq, struct buffer *buff);
  */
 void send(char *receiver, char *buf, int size);
 
+/*
+ * 接收线程从它自己的消息队列中取下sender发送给它的消息缓冲区
+ */
+struct buffer *remov(struct buffer **mq, int sender);
+
+/*
+ * 接收消息
+ */
+int receive(char *sender, char *recvBuf);
+
 /*--------------
  *打印所有tcb数组
  -----------------*/
 void printTCB();
+
+/*
+ * 打印所有tcb数组到文件
+ */
+void fprintTCB();
 
 /*
  *两个打印字符的线程
@@ -285,6 +321,16 @@ void producer();
  * 消费者
  */
 void customer();
+
+/*
+ * 消息发送者
+ */
+void msgSender();
+
+/*
+ * 消息接受者
+ */
+void msgReceive();
 
 /*
  * main 函数
@@ -325,6 +371,8 @@ int main()
 			create("customer", (codeptr)customer, 1024);
 			break;
 		case 3:
+			create("msgSender", (codeptr)msgSender, 1024);
+			create("msgReceive", (codeptr)msgReceive, 1024);
 			break;
 		default:
 			printf("Please enter the correct choice\n");
@@ -358,6 +406,11 @@ void initTCB()
 		tcb[i].state = FINISHED;
 		memset(tcb[i].name, '\0', NAME_LENGTH);
 		tcb[i].next = NULL;
+		tcb[i].mq = NULL;
+		tcb[i].mutex.value = 1;
+		tcb[i].mutex.wq = NULL;
+		tcb[i].sm.value = 0;
+		tcb[i].sm.wq = NULL;
 	}
 }
 
@@ -587,8 +640,8 @@ void p(struct semaphore *sem)
 		sem->value = sem->value - 1;
 		if (sem->value < 0)
 		{
-			fprintf(file, "\ngoods is not enough, customer is blocked!\n");
 			qp = &(sem->wq);
+			printf("need to block\n");
 			block(qp);
 		}
 	enable();
@@ -602,7 +655,7 @@ void v(struct semaphore *sem)
 		sem->value = sem->value + 1;
 		if (sem->value <= 0)
 		{
-			fprintf(file, "\na good is producer, wake up the blocked customer!\n");
+			printf("need to wakeup_first\n");
 			wakeup_first(qp);
 		}
 	enable();
@@ -639,16 +692,6 @@ void wakeup_first(struct TCB **qp)
 			*qp = (*qp)->next;
 		}
 	enable();
-}
-
-void printTCB()
-{
-	int i;
-	for(i = 0; i < TCB_MAX_NUM; i++)
-	{
-		printf("\n");
-		printf("pthread %d[%s]: state-----%d\n", i, tcb[i].name, tcb[i].state);
-	}
 }
 
 void f1()
@@ -721,6 +764,25 @@ void customer()
 		}
 	}
 }
+void initBuf()
+{
+	int i;
+	struct buffer *temp;
+	freebuf = (struct buffer*) malloc(sizeof(struct buffer));
+	freebuf->sender = -1;
+	freebuf->size = 0;
+	memset(freebuf->text, '\0', sizeof(char) * MSG_LENGTH);
+	temp = freebuf;
+	for(i = 0; i < BUF_NUM - 1; i++)
+	{
+		temp->next = (struct buffer*) malloc(sizeof(struct buffer));
+		temp->next->sender = -1;
+		temp->next->size = 0;
+		memset(temp->next->text, '\0', sizeof(char) * MSG_LENGTH);
+		temp = temp->next;
+		temp->next = NULL;
+	}
+}
 
 struct buffer *getBuf()
 {
@@ -737,7 +799,7 @@ void send(char *receiver, char *buf, int size)
 	disable();
 		for(i = 1; i < TCB_MAX_NUM; i++)
 		{
-			if (strcmp(tcb[i].name, buf) == 0)
+			if (strcmp(tcb[i].name, receiver) == 0)
 			{
 				id = i;
 			}
@@ -759,21 +821,63 @@ void send(char *receiver, char *buf, int size)
 		p(&tcb[id].mutex);
 			insert(&(tcb[id].mq), buff);
 		v(&tcb[id].mutex);
-		
+		v(&tcb[id].sm);
+		fprintTCB();
 	enable();
+}
+
+int receive(char *sender, char *recvBuf)
+{
+	int i, id = -1;
+	struct buffer *temp;
+	disable();
+	fprintf(file, "-------------receive start-------------\n");
+	fprintf(file, "sender is %s\n", sender);
+	for (i = 0; i < TCB_MAX_NUM; i++)
+	{
+		fprintf(file, "tcb[%d].name is %s\n", i, tcb[i].name);
+		if (strcmp(tcb[i].name, sender) == 0)
+		{
+			fprintf(file, "find the sender\n");
+			id = i;
+			break;
+		}
+	}
+	if (id == -1)
+	{
+		printf("Error: sender is not existed!\n");
+		enable();
+		return -1;
+	}
+	p(&tcb[current].sm);
+	p(&tcb[current].mutex);
+		temp = remov(&tcb[current].mq, id);
+		if (temp == NULL)
+		{
+			printf("Error: there is no message");
+			enable();
+			return -1;
+		}
+		memcpy(recvBuf, temp->text, temp->size);
+		fprintf(file, "take back the used buf to the freebuf\n");
+		insert(&freebuf, temp);
+		v(&sfb);
+	v(&tcb[current].mutex);
+	enable();
+	return strlen(recvBuf);
 }
 
 void insert(struct buffer **mq, struct buffer *buff)
 {
 	struct buffer *temp;
-	if (buffer == NULL)
+	if (buff == NULL)
 	{
 		return;
 	}
 	buff->next = NULL;
 	if (*mq == NULL)
 	{
-		*mq = buffer;
+		*mq = buff;
 	}
 	else
 	{
@@ -783,5 +887,96 @@ void insert(struct buffer **mq, struct buffer *buff)
 			temp = temp->next;
 		}
 		temp->next = buff;
+	}
+}
+
+struct buffer *remov(struct buffer **mq, int sender)
+{
+	struct buffer *temp, *rtn;
+	temp = *mq;
+	if (temp != NULL)
+	{
+		if (temp->sender == sender)
+		{
+			return temp;
+		}
+		while(temp->next != NULL)
+		{
+			if (temp->next->sender == sender)
+			{
+				break;
+			}
+			temp = temp->next;
+		}
+		rtn = temp->next;
+		temp->next = rtn->next;
+		rtn->next = NULL;
+		return rtn;
+	}
+	else
+	{
+		return NULL;
+	}
+}
+
+
+
+void msgSender()
+{
+	char msg[] = "Hello World!";
+	int i, j, k;
+	for (i = 0; i < 30; i++)
+	{
+		send("msgReceive", msg, strlen(msg));
+		printf("Sender has send a message!\n");
+		for(j = 0; j < 10000; j++)
+		{
+			for(k = 0; k < 10000; k++)
+			{
+			}
+		}
+	}
+}
+
+void msgReceive()
+{
+	char msg[MSG_LENGTH];
+	int i, j, k, recv;
+	for (i = 0; i < 30; i++)
+	{
+		memset(msg, '\0', MSG_LENGTH * sizeof(char));
+		fprintTCB();
+		recv = receive("msgSender", msg);
+		if (recv > 0)
+		{
+			printf("%d msgReceive receive a msg: %s\n", i, msg);
+		}		
+		for(j = 0; j < 10000; j++)
+		{
+			for(k = 0; k < 10000; k++)
+			{
+			}
+		}
+	}
+	
+}
+
+void printTCB()
+{
+	int i;
+	for(i = 0; i < TCB_MAX_NUM; i++)
+	{
+		printf("\n");
+		printf("pthread %d[%s]: state-----%d\n", i, tcb[i].name, tcb[i].state);
+	}
+}
+
+void fprintTCB()
+{
+	int i;
+	for(i = 0; i < TCB_MAX_NUM; i++)
+	{
+		fprintf(file, "\n");
+		fprintf(file, "pthread %d[%s]: state-----%d\n", i, tcb[i].name, tcb[i].state);
 	}
 }
