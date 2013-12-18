@@ -39,6 +39,46 @@
 
 #define MENU_ITEM 4
 
+/*
+ * 记录型信号量
+ */
+struct semaphore {
+	int value;
+	struct TCB *wq;
+};
+
+/*
+ * 消息缓冲区
+ * sender 发送者内部标志
+ * size 消息长度
+ * text 消息正文
+ * next 指向下一个消息缓存
+ */
+struct buffer
+{	
+	int sender;
+	int size;
+	char text[MSG_LENGTH];
+	struct buffer* next;
+};
+
+/*
+ * 系统消息缓存区
+ */
+struct buffer freebuf[BUF_NUM];
+
+/*
+ * 空闲消息缓冲区的记录型信号量, 用作互斥
+ */
+struct semaphore mutexfb;
+
+/*
+ * 空闲消息缓冲区的信号量，用同步, 
+ * 当系统空闲消息缓冲区为空的时候，线程请求，会阻塞
+ * 有表示数量
+ */
+struct semaphore sfb;
+
 /*---------------
  * TCB 结构体 表示一个线程
  * stack 堆栈起始地址
@@ -57,6 +97,9 @@ struct TCB{
 	struct TCB *next;
 };
 
+/*
+ * 日志文件句柄
+ */
 FILE *file;
 
 /*--------------
@@ -117,13 +160,7 @@ char menu[MENU_ITEM][80] = {
 	"D-Enter key 0 to exit"
 };
 
-/*
- * 记录型信号量
- */
-struct semaphore {
-	int value;
-	struct TCB *wq;
-};
+
 
 /*
  * 商品的信号量
@@ -211,6 +248,22 @@ void block(struct TCB **qp);
  * 唤醒线程
  */
 void wakeup_first(struct TCB **qp);
+
+/*
+ * 获取空闲缓冲区
+ */
+struct buffer *getBuf();
+
+/*
+ * 插入到消息缓冲队列
+ */
+void insert(struct buffer **mq, struct buffer *buff);
+
+/*
+ * 发送消息
+ * receiver 接收者，为线程的名字，需要从tcb中进行匹配寻找
+ */
+void send(char *receiver, char *buf, int size);
 
 /*--------------
  *打印所有tcb数组
@@ -666,5 +719,69 @@ void customer()
 			{
 			}
 		}
+	}
+}
+
+struct buffer *getBuf()
+{
+	struct buffer * buff;
+	buff = freebuf;
+	freebuf = freebuf->next;
+	return buff;
+}
+
+void send(char *receiver, char *buf, int size)
+{
+	struct buffer *buff;
+	int i, id = -1;
+	disable();
+		for(i = 1; i < TCB_MAX_NUM; i++)
+		{
+			if (strcmp(tcb[i].name, buf) == 0)
+			{
+				id = i;
+			}
+		}	
+		if (id == -1)
+		{
+			printf("Error: the receiver is not found!\n");
+			return;
+		}
+		p(&sfb);
+		p(&mutexfb);
+			buff = getBuf();
+			buff->sender = current;
+			buff->size = size;
+			memcpy(buff->text, buf, size);
+			buff->next = NULL;
+		v(&mutexfb);
+
+		p(&tcb[id].mutex);
+			insert(&(tcb[id].mq), buff);
+		v(&tcb[id].mutex);
+		
+	enable();
+}
+
+void insert(struct buffer **mq, struct buffer *buff)
+{
+	struct buffer *temp;
+	if (buffer == NULL)
+	{
+		return;
+	}
+	buff->next = NULL;
+	if (*mq == NULL)
+	{
+		*mq = buffer;
+	}
+	else
+	{
+		temp = *mq;
+		while(temp->next != NULL)
+		{
+			temp = temp->next;
+		}
+		temp->next = buff;
 	}
 }
