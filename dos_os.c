@@ -57,6 +57,8 @@ struct TCB{
 	struct TCB *next;
 };
 
+FILE *file;
+
 /*--------------
  *线程数组
  -----------------*/
@@ -244,6 +246,8 @@ int main()
 	tcb[0].state = RUNNING;
 	current = 0;
 
+	file = fopen("log.txt", "wt++");
+
 	printf("/*-------------*/\n");
 	for(i = 0; i < 3; i++)
 	{
@@ -285,6 +289,7 @@ int main()
 	tcb[0].state = FINISHED;
 	setvect(8, old_int8);
 	
+	fclose(file);
 	system("pause");
 	return 0;
 }
@@ -529,16 +534,9 @@ void p(struct semaphore *sem)
 		sem->value = sem->value - 1;
 		if (sem->value < 0)
 		{
+			fprintf(file, "\ngoods is not enough, customer is blocked!\n");
 			qp = &(sem->wq);
 			block(qp);
-			if (*qp == NULL)
-			{
-				printf("the block qp is NULL in p operation\n");
-			}
-			else
-			{
-				printf("the block qp is not NULL in p operation, name is %s \n", (*qp)->name);
-			}
 		}
 	enable();
 }
@@ -551,18 +549,8 @@ void v(struct semaphore *sem)
 		sem->value = sem->value + 1;
 		if (sem->value <= 0)
 		{
-			printf("start to wakeup_first\n");
-			if (*qp == NULL)
-			{
-				printf("the block qp is NULL in v operation\n");
-			}
-			else
-			{
-				printf("the block qp is not NULL in v operation, name is %s \n", (*qp)->name);
-			}
+			fprintf(file, "\na good is producer, wake up the blocked customer!\n");
 			wakeup_first(qp);
-			
-			printTCB();
 		}
 	enable();
 }
@@ -572,9 +560,19 @@ void block(struct TCB **qp)
 	struct TCB *temp;
 	disable();
 		temp = *qp;
-		printf("the thread named %s has been blocked\n", tcb[current].name);
 		tcb[current].state = BLOCKED;
-		temp = &(tcb[current]);//TDO
+		if (temp == NULL)
+		{
+			*qp = &(tcb[current]);
+		}
+		else
+		{
+			while(temp->next != NULL)
+			{
+				temp = temp->next;
+			}
+			temp->next = &(tcb[current]);
+		}
 	enable();
 	my_swtch();
 }
@@ -584,14 +582,9 @@ void wakeup_first(struct TCB **qp)
 	disable();
 		if (*qp != NULL)
 		{
-			printf("has wakeup a thread named %s\n", (*qp)->name);
 			(*qp)->state = READY;
 			*qp = (*qp)->next;
 		}
-		else
-		{
-			printf("the qp is null in the wakeup_first\n");
-		}	
 	enable();
 }
 
@@ -645,9 +638,10 @@ void producer()
 {
 	int i, j, k;
 	for(i = 0; i < 10; i++)
-	{
+	{	
+		fprintf(file, "\nproducer are ready to V\n");
 		v(&goods);
-		printf("producer has produced a good. Now has %d pairs of goods\n", goods.value);
+		fprintf(file, "Producer has produced a good. Now has %d pairs of goods\n", goods.value);
 		for(j = 0; j < 10000; j++)
 		{
 			for(k = 0; k < 10000; k++)
@@ -663,8 +657,9 @@ void customer()
 	int i, j, k;
 	for(i = 0; i < 10; i++)
 	{
+		fprintf(file, "\ncustomer are ready to P\n");
 		p(&goods);
-		printf("customer has customed a good. Now has %d pairs of goods\n", goods.value);
+		fprintf(file, "Customer has taken out a good.\n");
 		for(j = 0; j < 1000; j++)
 		{
 			for(k = 0; k < 1000; k++)
