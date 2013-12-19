@@ -45,7 +45,7 @@
 /*
  *每个线程能执行的时间片
  */
-#define TL 8
+#define TL 100
 
 #define MENU_ITEM 4
 
@@ -66,6 +66,7 @@ struct semaphore {
  */
 struct buffer
 {	
+	int id;
 	int sender;
 	int size;
 	char text[MSG_LENGTH];
@@ -182,6 +183,9 @@ char menu[MENU_ITEM][80] = {
  * 商品的信号量
  */
 struct semaphore goods;
+
+/*
+ *  
 
 /*--------------
  *初始化tcb数组
@@ -340,6 +344,7 @@ int main()
 	int i, chosen_item;
 	initTCB();
 	initDOS();
+	initBuf();
 
 	strcpy(tcb[0].name, "main");
 	tcb[0].state = RUNNING;
@@ -573,7 +578,7 @@ void interrupt my_swtch()
 {
 	int ready_pthread;
 	disable();
-		/*printf("CURRENT pthread is %d ", current);*/
+		//printf("CURRENT pthread is %d ", current);
 		tcb[current].ss = _SS;
 		tcb[current].sp = _SP;
 		if (tcb[current].state == RUNNING)
@@ -581,7 +586,7 @@ void interrupt my_swtch()
 			tcb[current].state = READY;
 		}
 		ready_pthread = find();
-		/*printf(" NOW find a ready pthread %d, gonna to swtch\n", ready_pthread);*/
+		//printf(" NOW find a ready pthread %d, gonna to swtch\n", ready_pthread);
 		_SS = tcb[ready_pthread].ss;
 		_SP = tcb[ready_pthread].sp;
 		tcb[ready_pthread].state = RUNNING;
@@ -641,7 +646,7 @@ void p(struct semaphore *sem)
 		if (sem->value < 0)
 		{
 			qp = &(sem->wq);
-			printf("need to block\n");
+			
 			block(qp);
 		}
 	enable();
@@ -655,7 +660,7 @@ void v(struct semaphore *sem)
 		sem->value = sem->value + 1;
 		if (sem->value <= 0)
 		{
-			printf("need to wakeup_first\n");
+			
 			wakeup_first(qp);
 		}
 	enable();
@@ -775,6 +780,7 @@ void initBuf()
 	temp = freebuf;
 	for(i = 0; i < BUF_NUM - 1; i++)
 	{
+		temp->id = i;
 		temp->next = (struct buffer*) malloc(sizeof(struct buffer));
 		temp->next->sender = -1;
 		temp->next->size = 0;
@@ -789,6 +795,11 @@ struct buffer *getBuf()
 	struct buffer * buff;
 	buff = freebuf;
 	freebuf = freebuf->next;
+	if (buff == NULL)
+	{
+		printf("buff is NULL in the getBuf");
+	}
+	//printf("the buffer id in getBuf : %d", buff->id);
 	return buff;
 }
 
@@ -807,11 +818,20 @@ void send(char *receiver, char *buf, int size)
 		if (id == -1)
 		{
 			printf("Error: the receiver is not found!\n");
+			enable();
 			return;
 		}
+		
 		p(&sfb);
+		//printf("mutexfb.value is %d\n", mutexfb.value);
 		p(&mutexfb);
 			buff = getBuf();
+			if (buff == NULL)
+			{
+				printf("buff is null\n");
+				enable();
+				return ;
+			}
 			buff->sender = current;
 			buff->size = size;
 			memcpy(buff->text, buf, size);
@@ -819,7 +839,7 @@ void send(char *receiver, char *buf, int size)
 		v(&mutexfb);
 
 		p(&tcb[id].mutex);
-			insert(&(tcb[id].mq), buff);
+			insert(&tcb[id].mq, buff);
 		v(&tcb[id].mutex);
 		v(&tcb[id].sm);
 		fprintTCB();
@@ -859,7 +879,7 @@ int receive(char *sender, char *recvBuf)
 			return -1;
 		}
 		memcpy(recvBuf, temp->text, temp->size);
-		fprintf(file, "take back the used buf to the freebuf\n");
+		//printf("take back the used buf to the freebuf\n");
 		insert(&freebuf, temp);
 		v(&sfb);
 	v(&tcb[current].mutex);
@@ -870,6 +890,7 @@ int receive(char *sender, char *recvBuf)
 void insert(struct buffer **mq, struct buffer *buff)
 {
 	struct buffer *temp;
+	int whilenumber = 0;
 	if (buff == NULL)
 	{
 		return;
@@ -882,10 +903,15 @@ void insert(struct buffer **mq, struct buffer *buff)
 	else
 	{
 		temp = *mq;
+		//printf("buffer id is : %d", temp->id);
 		while(temp->next != NULL)
 		{
+			//printf("buffer id is : %d", temp->next->id);
+			whilenumber++;
 			temp = temp->next;
 		}
+		//printf("there is %d whiles\n", whilenumber);
+		//printf("end of while\n");
 		temp->next = buff;
 	}
 }
@@ -893,25 +919,29 @@ void insert(struct buffer **mq, struct buffer *buff)
 struct buffer *remov(struct buffer **mq, int sender)
 {
 	struct buffer *temp, *rtn;
-	temp = *mq;
-	if (temp != NULL)
+	if (*mq != NULL)
 	{
-		if (temp->sender == sender)
+		temp = *mq;
+		if (temp->sender = sender)
 		{
+			*mq = temp->next;
 			return temp;
 		}
-		while(temp->next != NULL)
+		else
 		{
-			if (temp->next->sender == sender)
+			while(temp->next != NULL)
 			{
-				break;
+				if (temp->next->sender == sender)
+				{
+					break;
+				}
+				temp = temp->next;
 			}
-			temp = temp->next;
+			rtn = temp->next;
+			rtn->next = NULL;
+			temp->next = temp->next->next;
+			return rtn;
 		}
-		rtn = temp->next;
-		temp->next = rtn->next;
-		rtn->next = NULL;
-		return rtn;
 	}
 	else
 	{
@@ -928,10 +958,10 @@ void msgSender()
 	for (i = 0; i < 30; i++)
 	{
 		send("msgReceive", msg, strlen(msg));
-		printf("Sender has send a message!\n");
-		for(j = 0; j < 10000; j++)
+		printf("%d Sender has send a message!\n", i);
+		for(j = 0; j < 100; j++)
 		{
-			for(k = 0; k < 10000; k++)
+			for(k = 0; k < 100; k++)
 			{
 			}
 		}
